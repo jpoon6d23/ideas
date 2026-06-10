@@ -47,6 +47,17 @@ header h1{font-size:20px;font-weight:600}
   color:var(--text);border-radius:9px;cursor:pointer}
 .acts button.del{color:#b91c1c}
 .pendtag{font-size:12px;color:var(--muted);font-style:italic}
+.tick{width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:13px;color:transparent;align-self:center}
+.entry.sel{border-color:var(--accent)}
+.entry.sel .tick{background:var(--accent);border-color:var(--accent);color:#fff}
+#selbar{display:none;position:fixed;left:0;right:0;bottom:0;background:var(--card);
+  border-top:1px solid var(--border);padding:10px 16px calc(env(safe-area-inset-bottom) + 10px);z-index:10}
+#selbar.show{display:block}
+#selbar .inner{display:flex;gap:8px;max-width:560px;margin:0 auto}
+#selbar button{flex:1;padding:10px 0;font-size:14px;border:1px solid var(--border);
+  background:none;color:var(--text);border-radius:9px;cursor:pointer;white-space:nowrap}
+#selbar button.danger{color:#fff;background:#b91c1c;border:none}
 #settings{display:none;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin:8px 4px}
 #settings.show{display:block}
 #settings p{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px}
@@ -63,6 +74,7 @@ a{color:var(--accent)}
 <header>
   <h1>靈感錄音</h1>
   <div>
+    <button class="hbtn" id="selbtn">選擇</button>
     <button class="hbtn" id="exportbtn">匯出</button>
     <button class="hbtn" id="setbtn">設定</button>
   </div>
@@ -85,6 +97,13 @@ a{color:var(--accent)}
 <div id="list"></div>
 <div id="empty">撳上面個掣，講出你諗緊嘅嘢。<br>停低之後 AI 會自動幫你執重點。</div>
 
+<div id="selbar"><div class="inner">
+  <button id="selall">全選</button>
+  <button id="selexp">匯出</button>
+  <button id="seldel" class="danger">刪除</button>
+  <button id="seldone">完成</button>
+</div></div>
+
 <script>
 "use strict";
 var entries = JSON.parse(localStorage.getItem("vn_entries") || "[]");
@@ -92,6 +111,7 @@ var recording = false, rec = null, sessionFinal = "", stopping = false;
 var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 var LANGS = isIOS ? ["zh-HK","yue-Hant-HK","zh-TW"] : ["yue-Hant-HK","zh-HK","zh-TW"];
 var langIdx = 0;
+var selectMode = false, selected = {};
 
 var $ = function(id){ return document.getElementById(id); };
 
@@ -123,14 +143,17 @@ function render(){
       var h=document.createElement("div"); h.className="dayhead"; h.textContent=dayLabel(e.ts);
       list.appendChild(h);
     }
-    var card=document.createElement("div"); card.className="entry"; card.dataset.id=e.id;
+    var card=document.createElement("div");
+    card.className="entry"+(selectMode&&selected[e.id]?" sel":"");
+    card.dataset.id=e.id;
     var prev = e.sum ? e.sum.replace(/\n/g," ") : e.raw.replace(/\n/g," ");
     var sumHtml;
     if(e.status==="working") sumHtml='<span class="pendtag">AI 整理中…</span>';
     else if(e.sum) sumHtml='<div class="sum">'+esc(e.sum)+"</div>";
     else sumHtml='<span class="pendtag">未整理（撳「重新整理」）</span>';
     card.innerHTML =
-      '<div class="top"><span class="time">'+fmtTime(e.ts)+'</span><span class="prev">'+esc(prev)+"</span></div>"+
+      '<div class="top">'+(selectMode?'<span class="tick">✓</span>':'')+
+      '<span class="time">'+fmtTime(e.ts)+'</span><span class="prev">'+esc(prev)+"</span></div>"+
       '<div class="body"><div class="lbl">重點</div>'+sumHtml+
       '<div class="lbl">原文</div><div class="raw">'+esc(e.raw)+"</div>"+
       '<div class="acts"><button data-act="copy">複製</button><button data-act="redo">重新整理</button><button data-act="del" class="del">刪除</button></div></div>';
@@ -141,6 +164,13 @@ function render(){
 document.addEventListener("click", function(ev){
   var btn = ev.target.closest("[data-act]");
   var card = ev.target.closest(".entry");
+  if(selectMode && card){
+    var sid = Number(card.dataset.id);
+    if(selected[sid]) delete selected[sid]; else selected[sid]=true;
+    card.classList.toggle("sel");
+    updateSelBar();
+    return;
+  }
   if(btn && card){
     ev.stopPropagation();
     var id = Number(card.dataset.id);
@@ -278,9 +308,9 @@ $("savekey").addEventListener("click", function(){
   if(v){ localStorage.setItem("vn_key", v); $("settings").classList.remove("show"); setStatus("金鑰已儲存"); }
 });
 
-$("exportbtn").addEventListener("click", function(){
-  if(!entries.length){ setStatus("未有記錄可以匯出"); return; }
-  var txt = entries.slice().sort(function(a,b){return a.ts-b.ts;}).map(function(e){
+function exportTxt(list){
+  if(!list.length){ setStatus("未有記錄可以匯出"); return; }
+  var txt = list.slice().sort(function(a,b){return a.ts-b.ts;}).map(function(e){
     var d=new Date(e.ts);
     return "【"+d.getFullYear()+"/"+(d.getMonth()+1)+"/"+d.getDate()+" "+fmtTime(e.ts)+"】\n"+
       (e.sum?("重點：\n"+e.sum+"\n"):"")+"原文：\n"+e.raw;
@@ -288,6 +318,46 @@ $("exportbtn").addEventListener("click", function(){
   var blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob); a.download="靈感記錄.txt"; a.click();
+}
+$("exportbtn").addEventListener("click", function(){ exportTxt(entries); });
+
+function selCount(){ return Object.keys(selected).length; }
+function selList(){ return entries.filter(function(e){ return selected[e.id]; }); }
+function updateSelBar(){
+  var n=selCount();
+  $("selexp").textContent="匯出"+(n?"("+n+")":"");
+  $("seldel").textContent="刪除"+(n?"("+n+")":"");
+  $("selall").textContent=(n===entries.length&&n>0)?"全唔選":"全選";
+}
+function enterSel(on){
+  selectMode=on; selected={};
+  $("selbtn").textContent=on?"完成":"選擇";
+  $("selbar").classList.toggle("show",on);
+  $("list").style.paddingBottom=on?"80px":"";
+  render(); updateSelBar();
+}
+$("selbtn").addEventListener("click", function(){
+  if(!entries.length && !selectMode){ setStatus("未有記錄可以選擇"); return; }
+  enterSel(!selectMode);
+});
+$("seldone").addEventListener("click", function(){ enterSel(false); });
+$("selall").addEventListener("click", function(){
+  if(selCount()===entries.length){ selected={}; }
+  else { entries.forEach(function(e){ selected[e.id]=true; }); }
+  render(); updateSelBar();
+});
+$("selexp").addEventListener("click", function(){
+  var l=selList();
+  if(!l.length){ setStatus("未剔選任何記錄"); return; }
+  exportTxt(l);
+});
+$("seldel").addEventListener("click", function(){
+  var n=selCount();
+  if(!n){ setStatus("未剔選任何記錄"); return; }
+  if(confirm("確定刪除 "+n+" 條記錄？")){
+    entries=entries.filter(function(e){ return !selected[e.id]; });
+    save(); enterSel(false);
+  }
 });
 
 document.addEventListener("visibilitychange", function(){
