@@ -82,8 +82,11 @@ a{color:var(--accent)}
 <div id="settings">
   <p>AI 整理需要一個 Anthropic API 金鑰。去 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> 註冊 → 增值（最少 US$5）→ API Keys 建一個，貼喺度。每段錄音整理成本少過一毫子美金。金鑰只存喺你部機，唔會去其他地方。</p>
   <input type="password" id="keyinput" placeholder="sk-ant-..." autocomplete="off">
+  <p style="margin-top:6px">跨裝置同步（可選）：去 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">GitHub 開一個 token</a>（Repository access 揀 Only select repositories → ideas-data；Permissions → Contents → Read and write），貼喺度。每部裝置都貼同一條 token，記錄就會自動同步。記錄存喺你嘅私人 GitHub 倉庫，唔會公開。</p>
+  <input type="password" id="ghtoken" placeholder="github_pat_..." autocomplete="off">
+  <input type="text" id="ghrepo" placeholder="jpoon6d23/ideas-data" autocomplete="off">
   <div class="row">
-    <button id="savekey">儲存金鑰</button>
+    <button id="savekey">儲存設定</button>
   </div>
 </div>
 
@@ -111,6 +114,9 @@ var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 var LANGS = isIOS ? ["zh-HK","yue-Hant-HK","zh-TW"] : ["yue-Hant-HK","zh-HK","zh-TW"];
 var langIdx = 0;
 var selected = {};
+var deletedMap = JSON.parse(localStorage.getItem("vn_deleted") || "{}");
+var dirty = localStorage.getItem("vn_dirty") === "1";
+var syncing = false, syncPending = false;
 
 var $ = function(id){ return document.getElementById(id); };
 
@@ -118,6 +124,8 @@ function esc(s){
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 function save(){ localStorage.setItem("vn_entries", JSON.stringify(entries)); }
+function saveDel(){ localStorage.setItem("vn_deleted", JSON.stringify(deletedMap)); }
+function markDirty(){ dirty=true; localStorage.setItem("vn_dirty","1"); syncNow(); }
 function pad(n){ return (n<10?"0":"")+n; }
 function fmtTime(ts){ var d=new Date(ts); return pad(d.getHours())+":"+pad(d.getMinutes()); }
 function dayKey(ts){ var d=new Date(ts); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
@@ -177,7 +185,11 @@ document.addEventListener("click", function(ev){
     var e = entries.find(function(x){return x.id===id;});
     if(!e) return;
     if(btn.dataset.act==="del"){
-      if(confirm("確定刪除呢段記錄？")){ entries=entries.filter(function(x){return x.id!==id;}); save(); render(); }
+      if(confirm("確定刪除呢段記錄？")){
+        deletedMap[id]=Date.now(); saveDel();
+        entries=entries.filter(function(x){return x.id!==id;});
+        save(); render(); markDirty();
+      }
     } else if(btn.dataset.act==="copy"){
       var t=(e.sum?("重點：\n"+e.sum+"\n\n"):"")+"原文：\n"+e.raw;
       navigator.clipboard.writeText(t).then(function(){ btn.textContent="已複製"; setTimeout(function(){btn.textContent="複製";},1200); });
@@ -219,10 +231,65 @@ function summarize(text){
 function runSummary(e){
   e.status="working"; save(); render();
   summarize(e.raw).then(function(sum){
-    e.sum=sum; e.status="done"; save(); render();
+    e.sum=sum; e.status="done"; save(); render(); markDirty();
   }).catch(function(err){
     e.status="error"; save(); render();
     setStatus("整理失敗："+err.message);
+  });
+}
+
+function ghCfg(){
+  var t=localStorage.getItem("vn_ghtoken"), r=localStorage.getItem("vn_ghrepo");
+  return (t && r) ? {t:t, r:r} : null;
+}
+function b64enc(s){ return btoa(unescape(encodeURIComponent(s))); }
+function b64dec(s){ return decodeURIComponent(escape(atob(s.replace(/\n/g,"")))); }
+function mergeData(remote){
+  var rE=remote.entries||[], rD=remote.deleted||{};
+  for(var k in rD){ if(!deletedMap[k]) deletedMap[k]=rD[k]; }
+  var map={};
+  entries.forEach(function(e){ map[e.id]=e; });
+  rE.forEach(function(e){
+    var ex=map[e.id];
+    if(!ex || (!ex.sum && e.sum)) map[e.id]=e;
+  });
+  entries=Object.keys(map).map(function(k){ return map[k]; })
+    .filter(function(e){ return !deletedMap[e.id]; });
+  save(); saveDel();
+}
+function syncNow(){
+  var c=ghCfg(); if(!c) return;
+  if(syncing){ syncPending=true; return; }
+  syncing=true;
+  var api="https://api.github.com/repos/"+c.r+"/contents/entries.json";
+  var hdr={Authorization:"Bearer "+c.t, Accept:"application/vnd.github+json"};
+  fetch(api+"?nocache="+Date.now(), {headers:hdr})
+  .then(function(r){
+    if(r.status===404) return {sha:null, data:{entries:[],deleted:{}}};
+    if(!r.ok) throw new Error("讀取雲端失敗 "+r.status);
+    return r.json().then(function(j){
+      return {sha:j.sha, data:JSON.parse(b64dec(j.content))};
+    });
+  })
+  .then(function(res){
+    var before=JSON.stringify(entries);
+    mergeData(res.data);
+    if(JSON.stringify(entries)!==before) render();
+    if(!dirty && res.sha) return null;
+    var body={message:"sync", content:b64enc(JSON.stringify({entries:entries, deleted:deletedMap}))};
+    if(res.sha) body.sha=res.sha;
+    return fetch(api, {method:"PUT", headers:Object.assign({"content-type":"application/json"},hdr),
+      body:JSON.stringify(body)})
+    .then(function(r){
+      if(!r.ok) throw new Error("寫入雲端失敗 "+r.status);
+      dirty=false; localStorage.setItem("vn_dirty","0");
+    });
+  })
+  .then(function(){ syncing=false; if(syncPending){ syncPending=false; syncNow(); } })
+  .catch(function(err){
+    syncing=false;
+    setStatus("同步失敗："+err.message);
+    if(syncPending){ syncPending=false; }
   });
 }
 
@@ -290,7 +357,7 @@ function processSession(){
   var text=sessionFinal.trim() || $("live").textContent.trim();
   if(!text){ setStatus("乜都聽唔到，再試一次"); return; }
   var e={ id:Date.now(), ts:Date.now(), raw:text, sum:null, status:"new" };
-  entries.push(e); save(); render();
+  entries.push(e); save(); render(); markDirty();
   setStatus("");
   runSummary(e);
 }
@@ -302,10 +369,20 @@ $("recbtn").addEventListener("click", function(){
 $("setbtn").addEventListener("click", function(){
   var s=$("settings"); s.classList.toggle("show");
   $("keyinput").value = localStorage.getItem("vn_key") || "";
+  $("ghtoken").value = localStorage.getItem("vn_ghtoken") || "";
+  $("ghrepo").value = localStorage.getItem("vn_ghrepo") || "jpoon6d23/ideas-data";
 });
 $("savekey").addEventListener("click", function(){
   var v=$("keyinput").value.trim();
-  if(v){ localStorage.setItem("vn_key", v); $("settings").classList.remove("show"); setStatus("金鑰已儲存"); }
+  if(v) localStorage.setItem("vn_key", v);
+  var t=$("ghtoken").value.trim();
+  var rp=$("ghrepo").value.trim() || "jpoon6d23/ideas-data";
+  if(t){
+    localStorage.setItem("vn_ghtoken", t);
+    localStorage.setItem("vn_ghrepo", rp);
+    markDirty();
+  }
+  $("settings").classList.remove("show"); setStatus("設定已儲存");
 });
 
 function exportTxt(list){
@@ -347,16 +424,20 @@ $("seldel").addEventListener("click", function(){
   var n=selCount();
   if(!n){ setStatus("未剔選任何記錄"); return; }
   if(confirm("確定刪除 "+n+" 條記錄？")){
+    Object.keys(selected).forEach(function(id){ deletedMap[id]=Date.now(); });
+    saveDel();
     entries=entries.filter(function(e){ return !selected[e.id]; });
-    save(); clearSel();
+    save(); clearSel(); markDirty();
   }
 });
 
 document.addEventListener("visibilitychange", function(){
   if(document.hidden && recording) stopRec();
+  else if(!document.hidden) syncNow();
 });
 
 render();
+syncNow();
 </script>
 </body>
 </html>
