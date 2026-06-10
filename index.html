@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="靈感錄音">
+<title>靈感錄音</title>
+<style>
+:root{
+  --bg:#faf9f5; --card:#ffffff; --text:#1a1a17; --muted:#6e6d66;
+  --border:#e3e1d9; --accent:#c2410c; --accent-soft:#fdf0e7; --green:#0f6e56;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#1c1b18; --card:#262521; --text:#ece9e2; --muted:#a3a199;
+  --border:#3a3933; --accent:#f97316; --accent-soft:#3a2a1c; --green:#5dcaa5; }
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,"PingFang HK","PingFang TC",sans-serif;background:var(--bg);color:var(--text);
+  padding:env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px);max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 4px 8px}
+header h1{font-size:20px;font-weight:600}
+.hbtn{background:none;border:none;color:var(--muted);font-size:14px;padding:8px;cursor:pointer}
+.recwrap{text-align:center;padding:20px 0 8px}
+#recbtn{width:96px;height:96px;border-radius:50%;border:none;background:var(--accent);color:#fff;
+  font-size:17px;font-weight:600;cursor:pointer;transition:transform .15s}
+#recbtn:active{transform:scale(.94)}
+#recbtn.on{animation:pulse 1.2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(194,65,12,.45)}70%{box-shadow:0 0 0 22px rgba(194,65,12,0)}100%{box-shadow:0 0 0 0 rgba(194,65,12,0)}}
+#status{margin-top:12px;font-size:14px;color:var(--muted);min-height:20px}
+#live{margin:12px 4px 0;padding:12px 14px;background:var(--accent-soft);border-radius:12px;
+  font-size:15px;line-height:1.6;text-align:left;display:none;white-space:pre-wrap}
+.dayhead{font-size:13px;color:var(--muted);margin:22px 4px 8px;font-weight:600}
+.entry{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;margin:0 0 10px;cursor:pointer}
+.entry .top{display:flex;align-items:baseline;gap:10px}
+.entry .time{font-size:13px;font-weight:600;color:var(--accent);flex-shrink:0}
+.entry .prev{font-size:14px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.entry .body{display:none;margin-top:10px;font-size:15px;line-height:1.7}
+.entry.open .body{display:block}
+.entry.open .prev{display:none}
+.lbl{font-size:12px;color:var(--muted);font-weight:600;margin:10px 0 4px}
+.sum{white-space:pre-wrap}
+.raw{white-space:pre-wrap;color:var(--muted);font-size:14px}
+.acts{display:flex;gap:8px;margin-top:12px}
+.acts button{flex:1;padding:8px 0;font-size:13px;border:1px solid var(--border);background:none;
+  color:var(--text);border-radius:9px;cursor:pointer}
+.acts button.del{color:#b91c1c}
+.pendtag{font-size:12px;color:var(--muted);font-style:italic}
+#settings{display:none;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin:8px 4px}
+#settings.show{display:block}
+#settings p{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px}
+#settings input{width:100%;padding:10px 12px;font-size:14px;border:1px solid var(--border);
+  border-radius:9px;background:var(--bg);color:var(--text);margin-bottom:10px}
+#settings .row{display:flex;gap:8px}
+#settings button{flex:1;padding:10px 0;font-size:14px;border:none;border-radius:9px;cursor:pointer;
+  background:var(--accent);color:#fff;font-weight:600}
+#empty{text-align:center;color:var(--muted);font-size:14px;padding:40px 0;line-height:1.8}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>靈感錄音</h1>
+  <div>
+    <button class="hbtn" id="exportbtn">匯出</button>
+    <button class="hbtn" id="setbtn">設定</button>
+  </div>
+</header>
+
+<div id="settings">
+  <p>AI 整理需要一個 Anthropic API 金鑰。去 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> 註冊 → 增值（最少 US$5）→ API Keys 建一個，貼喺度。每段錄音整理成本少過一毫子美金。金鑰只存喺你部機，唔會去其他地方。</p>
+  <input type="password" id="keyinput" placeholder="sk-ant-..." autocomplete="off">
+  <div class="row">
+    <button id="savekey">儲存金鑰</button>
+  </div>
+</div>
+
+<div class="recwrap">
+  <button id="recbtn">錄音</button>
+  <div id="status"></div>
+  <div id="live"></div>
+</div>
+
+<div id="list"></div>
+<div id="empty">撳上面個掣，講出你諗緊嘅嘢。<br>停低之後 AI 會自動幫你執重點。</div>
+
+<script>
+"use strict";
+var entries = JSON.parse(localStorage.getItem("vn_entries") || "[]");
+var recording = false, rec = null, sessionFinal = "", stopping = false;
+
+var $ = function(id){ return document.getElementById(id); };
+
+function esc(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function save(){ localStorage.setItem("vn_entries", JSON.stringify(entries)); }
+function pad(n){ return (n<10?"0":"")+n; }
+function fmtTime(ts){ var d=new Date(ts); return pad(d.getHours())+":"+pad(d.getMinutes()); }
+function dayKey(ts){ var d=new Date(ts); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function dayLabel(ts){
+  var d=new Date(ts), now=new Date();
+  var diff = Math.floor((new Date(now.getFullYear(),now.getMonth(),now.getDate()) -
+             new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);
+  var base = (d.getMonth()+1)+"月"+d.getDate()+"日";
+  if(diff===0) return base+"（今日）";
+  if(diff===1) return base+"（尋日）";
+  return base;
+}
+
+function render(){
+  var list=$("list"); list.innerHTML="";
+  $("empty").style.display = entries.length ? "none" : "block";
+  var lastDay="";
+  entries.slice().sort(function(a,b){return b.ts-a.ts;}).forEach(function(e){
+    var dk=dayKey(e.ts);
+    if(dk!==lastDay){
+      lastDay=dk;
+      var h=document.createElement("div"); h.className="dayhead"; h.textContent=dayLabel(e.ts);
+      list.appendChild(h);
+    }
+    var card=document.createElement("div"); card.className="entry"; card.dataset.id=e.id;
+    var prev = e.sum ? e.sum.replace(/\n/g," ") : e.raw.replace(/\n/g," ");
+    var sumHtml;
+    if(e.status==="working") sumHtml='<span class="pendtag">AI 整理中…</span>';
+    else if(e.sum) sumHtml='<div class="sum">'+esc(e.sum)+"</div>";
+    else sumHtml='<span class="pendtag">未整理（撳「重新整理」）</span>';
+    card.innerHTML =
+      '<div class="top"><span class="time">'+fmtTime(e.ts)+'</span><span class="prev">'+esc(prev)+"</span></div>"+
+      '<div class="body"><div class="lbl">重點</div>'+sumHtml+
+      '<div class="lbl">原文</div><div class="raw">'+esc(e.raw)+"</div>"+
+      '<div class="acts"><button data-act="copy">複製</button><button data-act="redo">重新整理</button><button data-act="del" class="del">刪除</button></div></div>';
+    list.appendChild(card);
+  });
+}
+
+document.addEventListener("click", function(ev){
+  var btn = ev.target.closest("[data-act]");
+  var card = ev.target.closest(".entry");
+  if(btn && card){
+    ev.stopPropagation();
+    var id = Number(card.dataset.id);
+    var e = entries.find(function(x){return x.id===id;});
+    if(!e) return;
+    if(btn.dataset.act==="del"){
+      if(confirm("確定刪除呢段記錄？")){ entries=entries.filter(function(x){return x.id!==id;}); save(); render(); }
+    } else if(btn.dataset.act==="copy"){
+      var t=(e.sum?("重點：\n"+e.sum+"\n\n"):"")+"原文：\n"+e.raw;
+      navigator.clipboard.writeText(t).then(function(){ btn.textContent="已複製"; setTimeout(function(){btn.textContent="複製";},1200); });
+    } else if(btn.dataset.act==="redo"){
+      runSummary(e);
+    }
+    return;
+  }
+  if(card){ card.classList.toggle("open"); }
+});
+
+function setStatus(t){ $("status").textContent=t; }
+
+function summarize(text){
+  var key = localStorage.getItem("vn_key");
+  if(!key) return Promise.reject(new Error("未設定 API 金鑰，撳右上「設定」"));
+  return fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "x-api-key":key,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body:JSON.stringify({
+      model:"claude-haiku-4-5-20251001",
+      max_tokens:1000,
+      system:"你係一個諗法整理助手。用戶會俾你一段口述嘅文字（廣東話口語，可能夾雜英文）。你要：刪走重複、口頭禪、無意義嘅字句；提煉核心諗法；用簡短重點列出，每點用「·」開頭；完全保留用戶原意，唔好加入新內容、評論或建議；用廣東話書寫輸出。只輸出重點列表，唔好有任何開場白或結尾。",
+      messages:[{role:"user",content:text}]
+    })
+  }).then(function(r){
+    if(!r.ok) return r.json().then(function(d){
+      throw new Error(d.error && d.error.message ? d.error.message : "API 錯誤 "+r.status);
+    });
+    return r.json();
+  }).then(function(d){ return d.content[0].text.trim(); });
+}
+
+function runSummary(e){
+  e.status="working"; save(); render();
+  summarize(e.raw).then(function(sum){
+    e.sum=sum; e.status="done"; save(); render();
+  }).catch(function(err){
+    e.status="error"; save(); render();
+    setStatus("整理失敗："+err.message);
+  });
+}
+
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function startRec(){
+  if(!SR){ setStatus("呢個瀏覽器唔支援語音辨識，請用 iPhone Safari 開"); return; }
+  sessionFinal=""; recording=true; stopping=false;
+  $("recbtn").classList.add("on"); $("recbtn").textContent="停止";
+  $("live").style.display="block"; $("live").textContent="";
+  setStatus("聽緊… 講完撳「停止」");
+  newRecognizer();
+}
+
+function newRecognizer(){
+  rec = new SR();
+  rec.lang="zh-HK";
+  rec.continuous=true;
+  rec.interimResults=true;
+  rec.onresult=function(ev){
+    var interim="";
+    for(var i=ev.resultIndex;i<ev.results.length;i++){
+      if(ev.results[i].isFinal) sessionFinal += ev.results[i][0].transcript;
+      else interim += ev.results[i][0].transcript;
+    }
+    $("live").textContent = sessionFinal + interim;
+  };
+  rec.onerror=function(ev){
+    if(ev.error==="not-allowed"){
+      recording=false; finishUI();
+      setStatus("冇咪高風權限：設定 → Safari → 麥克風，允許呢個網站");
+    }
+  };
+  rec.onend=function(){
+    if(recording && !stopping){
+      try{ newRecognizer(); }catch(e){}
+    } else if(stopping){
+      processSession();
+    }
+  };
+  rec.start();
+}
+
+function stopRec(){
+  stopping=true; recording=false;
+  setStatus("處理緊…");
+  try{ rec.stop(); }catch(e){ processSession(); }
+}
+
+function finishUI(){
+  $("recbtn").classList.remove("on"); $("recbtn").textContent="錄音";
+  $("live").style.display="none";
+}
+
+var processed=false;
+function processSession(){
+  if(processed) return; processed=true;
+  setTimeout(function(){ processed=false; },500);
+  finishUI();
+  var text=sessionFinal.trim() || $("live").textContent.trim();
+  if(!text){ setStatus("乜都聽唔到，再試一次"); return; }
+  var e={ id:Date.now(), ts:Date.now(), raw:text, sum:null, status:"new" };
+  entries.push(e); save(); render();
+  setStatus("");
+  runSummary(e);
+}
+
+$("recbtn").addEventListener("click", function(){
+  if(recording) stopRec(); else startRec();
+});
+
+$("setbtn").addEventListener("click", function(){
+  var s=$("settings"); s.classList.toggle("show");
+  $("keyinput").value = localStorage.getItem("vn_key") || "";
+});
+$("savekey").addEventListener("click", function(){
+  var v=$("keyinput").value.trim();
+  if(v){ localStorage.setItem("vn_key", v); $("settings").classList.remove("show"); setStatus("金鑰已儲存"); }
+});
+
+$("exportbtn").addEventListener("click", function(){
+  if(!entries.length){ setStatus("未有記錄可以匯出"); return; }
+  var txt = entries.slice().sort(function(a,b){return a.ts-b.ts;}).map(function(e){
+    var d=new Date(e.ts);
+    return "【"+d.getFullYear()+"/"+(d.getMonth()+1)+"/"+d.getDate()+" "+fmtTime(e.ts)+"】\n"+
+      (e.sum?("重點：\n"+e.sum+"\n"):"")+"原文：\n"+e.raw;
+  }).join("\n\n----------------\n\n");
+  var blob=new Blob([txt],{type:"text/plain;charset=utf-8"});
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="靈感記錄.txt"; a.click();
+});
+
+document.addEventListener("visibilitychange", function(){
+  if(document.hidden && recording) stopRec();
+});
+
+render();
+</script>
+</body>
+</html>
