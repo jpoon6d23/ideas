@@ -89,6 +89,9 @@ a{color:var(--accent)}
 "use strict";
 var entries = JSON.parse(localStorage.getItem("vn_entries") || "[]");
 var recording = false, rec = null, sessionFinal = "", stopping = false;
+var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+var LANGS = isIOS ? ["zh-HK","yue-Hant-HK","zh-TW"] : ["yue-Hant-HK","zh-HK","zh-TW"];
+var langIdx = 0;
 
 var $ = function(id){ return document.getElementById(id); };
 
@@ -172,7 +175,7 @@ function summarize(text){
     body:JSON.stringify({
       model:"claude-haiku-4-5-20251001",
       max_tokens:1000,
-      system:"你係一個諗法整理助手。用戶會俾你一段口述嘅文字（廣東話口語，可能夾雜英文）。你要：刪走重複、口頭禪、無意義嘅字句；提煉核心諗法；用簡短重點列出，每點用「·」開頭；完全保留用戶原意，唔好加入新內容、評論或建議；用廣東話書寫輸出。只輸出重點列表，唔好有任何開場白或結尾。",
+      system:"你係一個諗法整理助手。用戶會俾你一段口述嘅文字（廣東話口語，可能夾雜英文）。你要：刪走重複、口頭禪、無意義嘅字句；提煉核心諗法；用簡短重點列出，每點用「·」開頭；完全保留用戶原意，唔好加入新內容、評論或建議；必須用繁體中文（香港用字）書寫輸出，即使輸入係簡體都要轉做繁體。只輸出重點列表，唔好有任何開場白或結尾。",
       messages:[{role:"user",content:text}]
     })
   }).then(function(r){
@@ -204,9 +207,15 @@ function startRec(){
   newRecognizer();
 }
 
+function restartRec(){
+  if(!recording || stopping) return;
+  try{ newRecognizer(); }
+  catch(e){ setTimeout(restartRec, 300); }
+}
+
 function newRecognizer(){
   rec = new SR();
-  rec.lang="zh-HK";
+  rec.lang = LANGS[langIdx];
   rec.continuous=true;
   rec.interimResults=true;
   rec.onresult=function(ev){
@@ -218,17 +227,16 @@ function newRecognizer(){
     $("live").textContent = sessionFinal + interim;
   };
   rec.onerror=function(ev){
-    if(ev.error==="not-allowed"){
+    if(ev.error==="not-allowed" || ev.error==="service-not-allowed"){
       recording=false; finishUI();
-      setStatus("冇咪高風權限：設定 → Safari → 麥克風，允許呢個網站");
+      setStatus("冇咪高風權限：請喺瀏覽器設定允許呢個網站用麥克風");
+    } else if(ev.error==="language-not-supported" && langIdx < LANGS.length-1){
+      langIdx++;
     }
   };
   rec.onend=function(){
-    if(recording && !stopping){
-      try{ newRecognizer(); }catch(e){}
-    } else if(stopping){
-      processSession();
-    }
+    if(stopping){ processSession(); }
+    else if(recording){ setTimeout(restartRec, 150); }
   };
   rec.start();
 }
