@@ -74,7 +74,6 @@ a{color:var(--accent)}
 <header>
   <h1>靈感錄音</h1>
   <div>
-    <button class="hbtn" id="selbtn">選擇</button>
     <button class="hbtn" id="exportbtn">匯出</button>
     <button class="hbtn" id="setbtn">設定</button>
   </div>
@@ -101,7 +100,7 @@ a{color:var(--accent)}
   <button id="selall">全選</button>
   <button id="selexp">匯出</button>
   <button id="seldel" class="danger">刪除</button>
-  <button id="seldone">完成</button>
+  <button id="seldone">取消</button>
 </div></div>
 
 <script>
@@ -111,7 +110,7 @@ var recording = false, rec = null, sessionFinal = "", stopping = false;
 var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 var LANGS = isIOS ? ["zh-HK","yue-Hant-HK","zh-TW"] : ["yue-Hant-HK","zh-HK","zh-TW"];
 var langIdx = 0;
-var selectMode = false, selected = {};
+var selected = {};
 
 var $ = function(id){ return document.getElementById(id); };
 
@@ -144,7 +143,7 @@ function render(){
       list.appendChild(h);
     }
     var card=document.createElement("div");
-    card.className="entry"+(selectMode&&selected[e.id]?" sel":"");
+    card.className="entry"+(selected[e.id]?" sel":"");
     card.dataset.id=e.id;
     var prev = e.sum ? e.sum.replace(/\n/g," ") : e.raw.replace(/\n/g," ");
     var sumHtml;
@@ -152,7 +151,7 @@ function render(){
     else if(e.sum) sumHtml='<div class="sum">'+esc(e.sum)+"</div>";
     else sumHtml='<span class="pendtag">未整理（撳「重新整理」）</span>';
     card.innerHTML =
-      '<div class="top">'+(selectMode?'<span class="tick">✓</span>':'')+
+      '<div class="top"><span class="tick">✓</span>'+
       '<span class="time">'+fmtTime(e.ts)+'</span><span class="prev">'+esc(prev)+"</span></div>"+
       '<div class="body"><div class="lbl">重點</div>'+sumHtml+
       '<div class="lbl">原文</div><div class="raw">'+esc(e.raw)+"</div>"+
@@ -164,7 +163,8 @@ function render(){
 document.addEventListener("click", function(ev){
   var btn = ev.target.closest("[data-act]");
   var card = ev.target.closest(".entry");
-  if(selectMode && card){
+  var tick = ev.target.closest(".tick");
+  if(tick && card){
     var sid = Number(card.dataset.id);
     if(selected[sid]) delete selected[sid]; else selected[sid]=true;
     card.classList.toggle("sel");
@@ -325,22 +325,14 @@ function selCount(){ return Object.keys(selected).length; }
 function selList(){ return entries.filter(function(e){ return selected[e.id]; }); }
 function updateSelBar(){
   var n=selCount();
-  $("selexp").textContent="匯出"+(n?"("+n+")":"");
-  $("seldel").textContent="刪除"+(n?"("+n+")":"");
+  $("selbar").classList.toggle("show", n>0);
+  $("list").style.paddingBottom = n>0 ? "80px" : "";
+  $("selexp").textContent="匯出("+n+")";
+  $("seldel").textContent="刪除("+n+")";
   $("selall").textContent=(n===entries.length&&n>0)?"全唔選":"全選";
 }
-function enterSel(on){
-  selectMode=on; selected={};
-  $("selbtn").textContent=on?"完成":"選擇";
-  $("selbar").classList.toggle("show",on);
-  $("list").style.paddingBottom=on?"80px":"";
-  render(); updateSelBar();
-}
-$("selbtn").addEventListener("click", function(){
-  if(!entries.length && !selectMode){ setStatus("未有記錄可以選擇"); return; }
-  enterSel(!selectMode);
-});
-$("seldone").addEventListener("click", function(){ enterSel(false); });
+function clearSel(){ selected={}; render(); updateSelBar(); }
+$("seldone").addEventListener("click", clearSel);
 $("selall").addEventListener("click", function(){
   if(selCount()===entries.length){ selected={}; }
   else { entries.forEach(function(e){ selected[e.id]=true; }); }
@@ -356,7 +348,7 @@ $("seldel").addEventListener("click", function(){
   if(!n){ setStatus("未剔選任何記錄"); return; }
   if(confirm("確定刪除 "+n+" 條記錄？")){
     entries=entries.filter(function(e){ return !selected[e.id]; });
-    save(); enterSel(false);
+    save(); clearSel();
   }
 });
 
